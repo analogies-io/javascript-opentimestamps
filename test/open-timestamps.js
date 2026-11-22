@@ -336,17 +336,118 @@ test('OpenTimestamps.upgrade() with the default whitelist skips foreign calendar
   assert.end()
 })
 
-test('OpenTimestamps.upgrade() keeps the timestamp when the calendar fails', async assert => {
-  const failing = await Helper.failingCalendar(500, 'down')
+// A proof whose pending attestation points at `uri`, as an upgrade would find it in storage.
+async function pendingProof (uri) {
   const detached = freshFile()
-  const pendingCalendar = await Helper.pendingCalendar(failing.url)
+  const pending = await Helper.pendingCalendar(uri)
   try {
-    await OpenTimestamps.stamp(detached, { calendars: [pendingCalendar.url] })
-    const changed = await OpenTimestamps.upgrade(detached, { whitelist: new Calendar.UrlWhitelist([failing.url]) })
-    assert.equal(changed, false)
+    await OpenTimestamps.stamp(detached, { calendars: [pending.url] })
   } finally {
-    await pendingCalendar.close()
+    await pending.close()
+  }
+  return detached
+}
+
+function bitcoinCalendar (height = 358391) {
+  return Helper.startCalendar((req, res) => {
+    res.writeHead(200)
+    res.end(Helper.bitcoinAnswer(Utils.hexToBytes(req.url.split('/')[2]), height))
+  })
+}
+
+test('OpenTimestamps.upgrade() rejects with the status code and text of a failing calendar', async assert => {
+  for (const [status, text] of [[503, 'calendar is down'], [400, 'bad commitment'], [500, 'boom']]) {
+    const failing = await Helper.failingCalendar(status, text)
+    try {
+      const detached = await pendingProof(failing.url)
+      const before = Array.from(detached.serializeToBytes())
+      const err = await rejection(assert, OpenTimestamps.upgrade(detached, { whitelist: new Calendar.UrlWhitelist([failing.url]) }))
+      assert.deepEqual(err.statusCodes, [status], 'status ' + status + ' is on the error')
+      assert.true(err.message.includes(text), 'the text of the calendar is in the message: ' + err.message)
+      assert.deepEqual(Array.from(detached.serializeToBytes()), before, 'the proof is unchanged')
+      assert.equal(pendingAttestations(detached).length, 1, 'still pending')
+    } finally {
+      await failing.close()
+    }
+  }
+  assert.end()
+})
+
+test('OpenTimestamps.upgrade() rejects when a calendar does not answer in time, without a status code', async assert => {
+  const silent = await Helper.startCalendar(() => {})
+  try {
+    const detached = await pendingProof(silent.url)
+    const err = await rejection(assert, OpenTimestamps.upgrade(detached, { whitelist: new Calendar.UrlWhitelist([silent.url]), timeout: 150 }))
+    assert.deepEqual(err.statusCodes, [], 'no HTTP status')
+    assert.true(/timed out/.test(err.message), err.message)
+  } finally {
+    await silent.close()
+  }
+  assert.end()
+})
+
+test('OpenTimestamps.upgrade() treats a 404 as pending: no error, proof unchanged', async assert => {
+  const notYet = await Helper.failingCalendar(404, 'Pending confirmation in Bitcoin blockchain')
+  try {
+    const detached = await pendingProof(notYet.url)
+    const before = Array.from(detached.serializeToBytes())
+    const changed = await OpenTimestamps.upgrade(detached, { whitelist: new Calendar.UrlWhitelist([notYet.url]) })
+    assert.equal(changed, false)
+    assert.deepEqual(Array.from(detached.serializeToBytes()), before)
+    assert.equal(pendingAttestations(detached).length, 1)
+    assert.equal(notYet.requests.length, 1, 'the calendar was asked')
+  } finally {
+    await notYet.close()
+  }
+  assert.end()
+})
+
+test('OpenTimestamps.upgrade() lets an attestation win over a failing calendar', async assert => {
+  const failing = await Helper.failingCalendar(503, 'down')
+  const good = await bitcoinCalendar(358391)
+  try {
+    const detached = await pendingProof('https://pending.example/calendar')
+    const changed = await OpenTimestamps.upgrade(detached, { calendars: [failing.url, good.url] })
+    assert.equal(changed, true)
+    const heights = Array.from(detached.timestamp.getAttestations())
+      .filter(a => a instanceof Notary.BitcoinBlockHeaderAttestation).map(a => a.height)
+    assert.deepEqual(heights, [358391], 'the upgraded proof carries the attestation')
+    assert.equal(failing.requests.length, 1, 'the failing calendar was asked too')
+  } finally {
     await failing.close()
+    await good.close()
+  }
+  assert.end()
+})
+
+test('OpenTimestamps.upgrade() counts a 503 but not a 404 when no calendar attests', async assert => {
+  const failing = await Helper.failingCalendar(503, 'down')
+  const notYet = await Helper.failingCalendar(404, 'not yet')
+  try {
+    for (const calendars of [[failing.url, notYet.url], [notYet.url, failing.url]]) {
+      const detached = await pendingProof('https://pending.example/calendar')
+      const err = await rejection(assert, OpenTimestamps.upgrade(detached, { calendars }))
+      assert.deepEqual(err.statusCodes, [503], 'only the 503 is reported')
+    }
+  } finally {
+    await failing.close()
+    await notYet.close()
+  }
+  assert.end()
+})
+
+test('OpenTimestamps.stamp() reports the status codes of the calendars as a list, even with "; " in the text', async assert => {
+  const calendarA = await Helper.failingCalendar(500, 'first; second; Calendar http://x answered HTTP 418: tea')
+  const calendarB = await Helper.failingCalendar(503, 'down')
+  const silent = await Helper.startCalendar(() => {})
+  try {
+    const err = await rejection(assert, OpenTimestamps.stamp(freshFile(), { calendars: [calendarA.url, silent.url, calendarB.url], m: 3, timeout: 300 }))
+    assert.deepEqual(err.statusCodes, [500, 503], 'codes in calendar order, the silent calendar has none')
+    assert.true(err.message.includes('first; second'), 'the text stays in the message: ' + err.message)
+  } finally {
+    await calendarA.close()
+    await calendarB.close()
+    await silent.close()
   }
   assert.end()
 })
@@ -375,9 +476,9 @@ test('stamp and upgrade write nothing to the console', async assert => {
       const p2 = await Helper.pendingCalendar(bad.url)
       await OpenTimestamps.stamp(failing, { calendars: [p2.url] })
       await p2.close()
-      await OpenTimestamps.upgrade(failing, { whitelist: new Calendar.UrlWhitelist([bad.url]) })
+      await OpenTimestamps.upgrade(failing, { whitelist: new Calendar.UrlWhitelist([bad.url]) }).catch(() => {})
       await OpenTimestamps.upgrade(failing)
-      await OpenTimestamps.upgrade(failing, { calendars: [bad.url] })
+      await OpenTimestamps.upgrade(failing, { calendars: [bad.url] }).catch(() => {})
     })
     assert.deepEqual(written, [], 'no console output')
   } finally {
