@@ -1,91 +1,28 @@
-
 const test = require('tape')
-const rp = require('request-promise')
+const fs = require('fs')
+const path = require('path')
 const Utils = require('../src/utils.js')
 const OpenTimestamps = require('../src/open-timestamps.js')
 const DetachedTimestampFile = require('../src/detached-timestamp-file.js')
+const Calendar = require('../src/calendar.js')
 const Context = require('../src/context.js')
 const Ops = require('../src/ops.js')
 const Notary = require('../src/notary.js')
+const Helper = require('./helpers/calendar-server.js')
 
-// const Timestamp = require('../timestamp.js');
-const baseUrl = 'https://raw.githubusercontent.com/opentimestamps/javascript-opentimestamps/master'
-let incompleteOtsInfo
-let incompleteOts
-let incomplete
-let helloworldOts
-let helloworld
-let merkle2Ots
-let merkle2OtsInfo
-let unknown
-let unknownOts
-let knownUnknown
-let knownUnknownOts
-let merkle3
-let merkle3Ots
-let badStamp
-let badStampOts
-let osdsp
-let osdspOts
-
-test('setup', assert => {
-  const incompleteOtsInfoPromise = rp({ url: baseUrl + '/examples/incomplete.txt.ots.info', encoding: null })
-  const incompleteOtsPromise = rp({ url: baseUrl + '/examples/incomplete.txt.ots', encoding: null })
-  const incompletePromise = rp({ url: baseUrl + '/examples/incomplete.txt', encoding: null })
-
-  const helloworldOtsPromise = rp({ url: baseUrl + '/examples/hello-world.txt.ots', encoding: null })
-  const helloworldPromise = rp({ url: baseUrl + '/examples/hello-world.txt', encoding: null })
-
-  const merkle2OtsPromise = rp({ url: baseUrl + '/examples/merkle2.txt.ots', encoding: null })
-  const merkle2OtsInfoPromise = rp({ url: baseUrl + '/examples/merkle2.txt.ots.info', encoding: null })
-
-  const unknownPromise = rp({ url: baseUrl + '/examples/unknown-notary.txt', encoding: null })
-  const unknownOtsPromise = rp({ url: baseUrl + '/examples/unknown-notary.txt.ots', encoding: null })
-
-  const knownUnknownPromise = rp({ url: baseUrl + '/examples/known-and-unknown-notary.txt', encoding: null })
-  const knownUnknownOtsPromise = rp({ url: baseUrl + '/examples/known-and-unknown-notary.txt.ots', encoding: null })
-
-  const merkle3Promise = rp({ url: baseUrl + '/examples/merkle3.txt', encoding: null })
-  const merkle3OtsPromise = rp({ url: baseUrl + '/examples/merkle3.txt.ots', encoding: null })
-
-  const badStampPromise = rp({ url: baseUrl + '/examples/bad-stamp.txt', encoding: null })
-  const badStampOtsPromise = rp({ url: baseUrl + '/examples/bad-stamp.txt.ots', encoding: null })
-
-  const osdspPromise = rp({ url: baseUrl + '/examples/osdsp.txt', encoding: null })
-  const osdspOtsPromise = rp({ url: baseUrl + '/examples/osdsp.txt.ots', encoding: null })
-
-  Promise.all([
-    incompleteOtsInfoPromise, incompleteOtsPromise, incompletePromise,
-    helloworldOtsPromise, helloworldPromise,
-    merkle2OtsPromise, merkle2OtsInfoPromise,
-    unknownPromise, unknownOtsPromise,
-    knownUnknownPromise, knownUnknownOtsPromise,
-    merkle3Promise, merkle3OtsPromise,
-    badStampPromise, badStampOtsPromise,
-    osdspPromise, osdspOtsPromise
-  ]).then(values => {
-    incompleteOtsInfo = values[0]
-    incompleteOts = values[1]
-    incomplete = values[2]
-    helloworldOts = values[3]
-    helloworld = values[4]
-    merkle2Ots = values[5]
-    merkle2OtsInfo = values[6]
-    unknown = values[7]
-    unknownOts = values[8]
-    knownUnknown = values[9]
-    knownUnknownOts = values[10]
-    merkle3 = values[11]
-    merkle3Ots = values[12]
-    badStamp = values[13]
-    badStampOts = values[14]
-    osdsp = values[15]
-    osdspOts = values[16]
-    assert.end()
-  }).catch(err => {
-    assert.fail('err=' + err)
-  })
-})
+// The example files ship with the repository, so no test needs the network.
+const example = name => fs.readFileSync(path.join(__dirname, '..', 'examples', name))
+const incompleteOtsInfo = example('incomplete.txt.ots.info')
+const incompleteOts = example('incomplete.txt.ots')
+const incomplete = example('incomplete.txt')
+const helloworldOts = example('hello-world.txt.ots')
+const helloworld = example('hello-world.txt')
+const merkle2Ots = example('merkle2.txt.ots')
+const merkle2OtsInfo = example('merkle2.txt.ots.info')
+const unknownOts = example('unknown-notary.txt.ots')
+const knownUnknownOts = example('known-and-unknown-notary.txt.ots')
+const merkle3Ots = example('merkle3.txt.ots')
+const badStampOts = example('bad-stamp.txt.ots')
 
 // INFO TESTS
 test('OpenTimestamps.info()', assert => {
@@ -155,177 +92,6 @@ test('OpenTimestamps.DetachedTimestampFile()', assert => {
   assert.true(detached2.equals(detached3))
   assert.true(detached3.equals(detached4))
   assert.end()
-})
-
-// STAMP TESTS FILE
-
-test('OpenTimestamps.stamp()', assert => {
-  const sha256 = Utils.hexToBytes('05c4f616a8e5310d19d938cfd769864d7f4ccdc2ca8b479b10af83564b097af9')
-  const detached = DetachedTimestampFile.fromBytes(new Ops.OpSHA256(), incomplete)
-  OpenTimestamps.stamp(detached).then(() => {
-    assert.false(detached === undefined)
-    assert.true(Utils.arrEq(sha256, detached.fileDigest()))
-    assert.end()
-  }).catch(err => {
-    assert.fail('err=' + err)
-  })
-})
-
-// STAMP TESTS HASH
-test('OpenTimestamps.stamp()', assert => {
-  // Pass single input file
-  const sha256 = Utils.hexToBytes('05c4f616a8e5310d19d938cfd769864d7f4ccdc2ca8b479b10af83564b097af9')
-  const detached = DetachedTimestampFile.fromHash(new Ops.OpSHA256(), sha256)
-
-  OpenTimestamps.stamp(detached).then(() => {
-    assert.false(detached === undefined)
-    assert.true(Utils.arrEq(sha256, detached.fileDigest()))
-    assert.end()
-  }).catch(err => {
-    assert.fail('err=' + err)
-  })
-})
-
-// MULTISTAMP TESTS HASH
-
-test('OpenTimestamps.stamp()', assert => {
-  const files = [
-    incomplete,
-    helloworld
-  ]
-  const sha256 = [
-    Utils.hexToBytes('05c4f616a8e5310d19d938cfd769864d7f4ccdc2ca8b479b10af83564b097af9'),
-    Utils.hexToBytes('03ba204e50d126e4674c005e04d82e84c21366780af1f43bd54a37816b6ab340')
-  ]
-  const detaches = []
-  files.forEach(file => {
-    const detached = DetachedTimestampFile.fromBytes(new Ops.OpSHA256(), new Context.StreamDeserialization(file))
-    detaches.push(detached)
-  })
-  files.forEach((files, i) => {
-    assert.true(Utils.arrEq(sha256[i], detaches[i].fileDigest()))
-  })
-
-  OpenTimestamps.stamp(detaches).then(() => {
-    assert.equals(detaches.length, files.length)
-
-    detaches.forEach((timestamp, i) => {
-      assert.false(timestamp === undefined)
-      assert.true(Utils.arrEq(sha256[i], timestamp.fileDigest()))
-    })
-    assert.end()
-  }).catch(err => {
-    assert.fail('err=' + err)
-  })
-})
-
-// UPGRADE TESTS
-
-test('OpenTimestamps.upgrade()', assert => {
-  const detached = DetachedTimestampFile.deserialize(new Context.StreamDeserialization(incompleteOts))
-  const detachedBefore = DetachedTimestampFile.deserialize(new Context.StreamDeserialization(incompleteOts))
-
-  OpenTimestamps.upgrade(detached).then(changed => {
-    assert.true(detached !== null)
-    assert.true(changed)
-    assert.false(detached.equals(detachedBefore))
-    assert.end()
-  }).catch(err => {
-    assert.fail('err=' + err)
-    assert.end()
-  })
-})
-
-test('OpenTimestamps.upgrade()', assert => {
-  const detached = DetachedTimestampFile.deserialize(new Context.StreamDeserialization(helloworldOts))
-  const detachedBefore = DetachedTimestampFile.deserialize(new Context.StreamDeserialization(helloworldOts))
-
-  OpenTimestamps.upgrade(detached).then(changed => {
-    assert.true(detached !== null)
-    assert.false(changed)
-    assert.true(detached.equals(detachedBefore))
-    assert.end()
-  }).catch(err => {
-    assert.fail('err=' + err)
-    assert.end()
-  })
-})
-
-test('OpenTimestamps.upgrade()', assert => {
-  const detached = DetachedTimestampFile.deserialize(new Context.StreamDeserialization(unknownOts))
-  const detachedBefore = DetachedTimestampFile.deserialize(new Context.StreamDeserialization(unknownOts))
-
-  OpenTimestamps.upgrade(detached).then(changed => {
-    assert.true(detached !== null)
-    assert.false(changed)
-    assert.true(detached.equals(detachedBefore))
-    assert.end()
-  }).catch(err => {
-    assert.fail('err=' + err)
-    assert.end()
-  })
-})
-
-test('OpenTimestamps.upgrade()', assert => {
-  const detached = DetachedTimestampFile.deserialize(new Context.StreamDeserialization(knownUnknownOts))
-  const detachedBefore = DetachedTimestampFile.deserialize(new Context.StreamDeserialization(knownUnknownOts))
-
-  OpenTimestamps.upgrade(detached).then(changed => {
-    assert.true(detached !== null)
-    assert.true(changed)
-    assert.false(detached.equals(detachedBefore))
-    assert.end()
-  }).catch(err => {
-    assert.fail('err=' + err)
-    assert.end()
-  })
-})
-
-test('OpenTimestamps.upgrade()', assert => {
-  const detached = DetachedTimestampFile.deserialize(new Context.StreamDeserialization(merkle3Ots))
-  const detachedBefore = DetachedTimestampFile.deserialize(new Context.StreamDeserialization(merkle3Ots))
-
-  OpenTimestamps.upgrade(detached).then(changed => {
-    assert.true(detached !== null)
-    assert.true(changed)
-    assert.false(detached.equals(detachedBefore))
-    assert.end()
-  }).catch(err => {
-    assert.fail('err=' + err)
-    assert.end()
-  })
-})
-
-test('OpenTimestamps.upgrade()', assert => {
-  const detached = DetachedTimestampFile.deserialize(new Context.StreamDeserialization(badStampOts))
-  const detachedBefore = DetachedTimestampFile.deserialize(new Context.StreamDeserialization(badStampOts))
-
-  OpenTimestamps.upgrade(detached).then(changed => {
-    assert.true(detached !== null)
-    assert.false(changed)
-    assert.true(detached.equals(detachedBefore))
-    assert.end()
-  }).catch(err => {
-    assert.fail('err=' + err)
-    assert.end()
-  })
-})
-
-test('OpenTimestamps.stamp&upgrade()', assert => {
-  const sha256 = Utils.hexToBytes('05c4f616a8e5310d19d938cfd769864d7f4ccdc2ca8b479b10af83564b097af9')
-  const detached = DetachedTimestampFile.fromBytes(new Ops.OpSHA256(), incomplete)
-  OpenTimestamps.stamp(detached).then(() => {
-    assert.false(detached === undefined)
-    assert.true(Utils.arrEq(sha256, detached.fileDigest()))
-    return OpenTimestamps.upgrade(detached)
-  }).then(changed => {
-    assert.true(detached !== null)
-    assert.false(changed)
-    assert.end()
-  }).catch(err => {
-    assert.fail('err=' + err)
-    assert.end()
-  })
 })
 
 test('OpenTimestamps.emptyTimestamp()', assert => {
@@ -404,5 +170,220 @@ test('OpenTimestamps.serialize()', assert => {
     assert.fail()
   }
 
+  assert.end()
+})
+
+// STAMP AND UPGRADE AGAINST AN IN-PROCESS CALENDAR
+const SHA256_OF_HELLO = () => (new Ops.OpSHA256()).call(helloworld)
+const freshFile = () => DetachedTimestampFile.fromHash(new Ops.OpSHA256(), SHA256_OF_HELLO())
+
+function pendingAttestations (detached) {
+  return Array.from(detached.timestamp.getAttestations()).filter(a => a instanceof Notary.PendingAttestation)
+}
+
+// Runs `fn` while console.* is replaced by a recorder; returns what was written.
+async function captureConsole (fn) {
+  const names = ['log', 'error', 'warn', 'info', 'debug']
+  const saved = {}
+  const written = []
+  names.forEach(name => {
+    saved[name] = console[name]
+    console[name] = (...args) => written.push(name + ': ' + args.join(' '))
+  })
+  try {
+    await fn()
+  } catch (err) {
+    written.push('rejected: ' + err.message)
+  } finally {
+    names.forEach(name => { console[name] = saved[name] })
+  }
+  return written
+}
+
+// Resolves with the rejection reason; fails the test when the promise resolves or hangs.
+function rejection (assert, promise, ms = 4000) {
+  let timer
+  const guard = new Promise((resolve, reject) => {
+    timer = setTimeout(() => reject(new Error('no rejection within ' + ms + ' ms')), ms)
+  })
+  return Promise.race([promise, guard]).then(
+    value => { assert.fail('expected a rejection, got ' + value); return new Error('resolved') },
+    err => err
+  ).finally(() => clearTimeout(timer))
+}
+
+test('OpenTimestamps.stamp() adds the pending attestation of the calendar', async assert => {
+  const calendar = await Helper.pendingCalendar('https://alice.example/calendar')
+  try {
+    const detached = freshFile()
+    await OpenTimestamps.stamp(detached, { calendars: [calendar.url] })
+    const pending = pendingAttestations(detached)
+    assert.equal(pending.length, 1)
+    assert.equal(pending[0].uri, 'https://alice.example/calendar')
+    // The calendar received sha256(digest || nonce), never the digest itself.
+    const sent = calendar.requests[0].body
+    assert.equal(sent.length, 32)
+    assert.false(Utils.arrEq(Array.from(sent), SHA256_OF_HELLO()), 'the digest is not sent as is')
+    assert.true(Array.from(detached.timestamp.allTips()).some(tip => Utils.arrEq(tip, Array.from(sent))), 'the sent value is a tip of the tree')
+  } finally {
+    await calendar.close()
+  }
+  assert.end()
+})
+
+test('OpenTimestamps.stamp() fails when every calendar fails', async assert => {
+  const calendarA = await Helper.failingCalendar(500, 'down A')
+  const calendarB = await Helper.failingCalendar(503, 'down B')
+  try {
+    for (const options of [
+      { calendars: [calendarA.url, calendarB.url] },
+      { calendars: [calendarA.url, calendarB.url], m: 1 },
+      { calendars: [calendarA.url], m: 1 }
+    ]) {
+      const detached = freshFile()
+      const err = await rejection(assert, OpenTimestamps.stamp(detached, options))
+      assert.true(err instanceof Error && err.message.length > 0, 'error: ' + err.message)
+      assert.equal(pendingAttestations(detached).length, 0, 'no attestation was invented')
+    }
+  } finally {
+    await calendarA.close()
+    await calendarB.close()
+  }
+  assert.end()
+})
+
+test('OpenTimestamps.stamp() enforces m', async assert => {
+  const good = await Helper.pendingCalendar('https://good.example/calendar')
+  const bad = await Helper.failingCalendar(500, 'down')
+  try {
+    const detachedM2 = freshFile()
+    const err = await rejection(assert, OpenTimestamps.stamp(detachedM2, { calendars: [good.url, bad.url], m: 2 }))
+    assert.true(/2/.test(err.message) || /calendar/i.test(err.message), 'm = 2 with one failure rejects: ' + err.message)
+
+    const detachedDefault = freshFile()
+    await rejection(assert, OpenTimestamps.stamp(detachedDefault, { calendars: [good.url, bad.url] }))
+
+    const detachedM1 = freshFile()
+    await OpenTimestamps.stamp(detachedM1, { calendars: [good.url, bad.url], m: 1 })
+    assert.equal(pendingAttestations(detachedM1).length, 1, 'm = 1 accepts one answer out of two')
+  } finally {
+    await good.close()
+    await bad.close()
+  }
+  assert.end()
+})
+
+test('OpenTimestamps.stamp() passes the timeout on to the calendars', async assert => {
+  const silent = await Helper.startCalendar(() => { /* never answers */ })
+  try {
+    const started = Date.now()
+    const err = await rejection(assert, OpenTimestamps.stamp(freshFile(), { calendars: [silent.url], timeout: 150 }))
+    assert.true(Date.now() - started < 3000, 'rejected soon after the timeout: ' + err.message)
+  } finally {
+    await silent.close()
+  }
+  assert.end()
+})
+
+test('OpenTimestamps.stamp() rejects an invalid m', async assert => {
+  const calendar = await Helper.pendingCalendar('https://alice.example/calendar')
+  try {
+    const err = await rejection(assert, OpenTimestamps.stamp(freshFile(), { calendars: [calendar.url], m: 5 }))
+    assert.true(err instanceof Error)
+    assert.equal(calendar.requests.length, 0, 'no calendar was contacted')
+  } finally {
+    await calendar.close()
+  }
+  assert.end()
+})
+
+test('OpenTimestamps.upgrade() merges the attestation of a whitelisted calendar', async assert => {
+  const upgradeCalendar = await Helper.startCalendar((req, res) => {
+    res.writeHead(200)
+    res.end(Helper.bitcoinAnswer(Utils.hexToBytes(req.url.split('/')[2]), 358391))
+  })
+  try {
+    // A pending attestation that points at the in-process calendar.
+    const detached = freshFile()
+    const pendingCalendar = await Helper.pendingCalendar(upgradeCalendar.url)
+    await OpenTimestamps.stamp(detached, { calendars: [pendingCalendar.url] })
+    await pendingCalendar.close()
+
+    const whitelist = new Calendar.UrlWhitelist([upgradeCalendar.url])
+    const changed = await OpenTimestamps.upgrade(detached, { whitelist })
+    assert.true(changed, 'upgraded')
+    const heights = Array.from(detached.timestamp.getAttestations())
+      .filter(a => a instanceof Notary.BitcoinBlockHeaderAttestation).map(a => a.height)
+    assert.deepEqual(heights, [358391])
+    assert.equal(upgradeCalendar.requests.length, 1)
+  } finally {
+    await upgradeCalendar.close()
+  }
+  assert.end()
+})
+
+test('OpenTimestamps.upgrade() with the default whitelist skips foreign calendars without any request', async assert => {
+  const detached = freshFile()
+  const foreign = await Helper.pendingCalendar('https://calendar.evil.example')
+  try {
+    await OpenTimestamps.stamp(detached, { calendars: [foreign.url] })
+  } finally {
+    await foreign.close()
+  }
+  const changed = await OpenTimestamps.upgrade(detached)
+  assert.equal(changed, false)
+  assert.equal(pendingAttestations(detached).length, 1)
+  assert.end()
+})
+
+test('OpenTimestamps.upgrade() keeps the timestamp when the calendar fails', async assert => {
+  const failing = await Helper.failingCalendar(500, 'down')
+  const detached = freshFile()
+  const pendingCalendar = await Helper.pendingCalendar(failing.url)
+  try {
+    await OpenTimestamps.stamp(detached, { calendars: [pendingCalendar.url] })
+    const changed = await OpenTimestamps.upgrade(detached, { whitelist: new Calendar.UrlWhitelist([failing.url]) })
+    assert.equal(changed, false)
+  } finally {
+    await pendingCalendar.close()
+    await failing.close()
+  }
+  assert.end()
+})
+
+test('stamp and upgrade write nothing to the console', async assert => {
+  const good = await Helper.pendingCalendar('https://alice.example/calendar')
+  const bad = await Helper.failingCalendar(500, 'down')
+  const upgradeCalendar = await Helper.startCalendar((req, res) => {
+    res.writeHead(200)
+    res.end(Helper.bitcoinAnswer(Utils.hexToBytes(req.url.split('/')[2]), 1))
+  })
+  try {
+    const written = await captureConsole(async () => {
+      await OpenTimestamps.stamp(freshFile(), { calendars: [good.url, bad.url], m: 1 })
+      await OpenTimestamps.stamp(freshFile(), { calendars: [bad.url] }).catch(() => {})
+      await OpenTimestamps.stamp(freshFile(), { calendars: [good.url], m: 3 }).catch(() => {})
+
+      // upgrade: a calendar that upgrades, one that fails, one outside the whitelist, one overridden by options.calendars
+      const detached = freshFile()
+      const p1 = await Helper.pendingCalendar(upgradeCalendar.url)
+      await OpenTimestamps.stamp(detached, { calendars: [p1.url] })
+      await p1.close()
+      await OpenTimestamps.upgrade(detached, { whitelist: new Calendar.UrlWhitelist([upgradeCalendar.url]) })
+
+      const failing = freshFile()
+      const p2 = await Helper.pendingCalendar(bad.url)
+      await OpenTimestamps.stamp(failing, { calendars: [p2.url] })
+      await p2.close()
+      await OpenTimestamps.upgrade(failing, { whitelist: new Calendar.UrlWhitelist([bad.url]) })
+      await OpenTimestamps.upgrade(failing)
+      await OpenTimestamps.upgrade(failing, { calendars: [bad.url] })
+    })
+    assert.deepEqual(written, [], 'no console output')
+  } finally {
+    await good.close()
+    await bad.close()
+    await upgradeCalendar.close()
+  }
   assert.end()
 })

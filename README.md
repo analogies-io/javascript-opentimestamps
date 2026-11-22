@@ -21,6 +21,22 @@ It has been developed as node modules for being used within Node environments al
 
 [Jsdoc](https://opentimestamps.org/docs/javascript-opentimestamps/) available
 
+## Zmiany względem upstream (Changes from upstream)
+
+This is a modified fork of [opentimestamps/javascript-opentimestamps](https://github.com/opentimestamps/javascript-opentimestamps) `0.4.9` (commit `c07ba8b`), maintained by analogies-io for the stamp and upgrade paths only. The library is licensed under LGPL-3.0; the `LICENSE` file and the `@license` headers are unchanged, and the modified source stays under the same license.
+
+Changes:
+
+- Dependencies: `request`, `request-promise`, `bitcore-lib`, `bytebuffer`, `commander`, `fs`, `moment-timezone`, `properties`, `randomstring` and `promise` are gone; `minimatch` is `^11.0.1`. `engines.node` is `>=24`.
+- Removed: `OpenTimestamps.verify` (with `src/esplora.js` and `src/bitcoin.js`), the `ots-cli.js` command line, the gulp/browserify browser build and the jsdoc configuration. The "Browser" and command line sections below describe upstream and no longer apply.
+- `src/calendar.js`: HTTP through `fetch` with a timeout (`RemoteCalendar` option `timeout`, default 10 s); the response limit (10000 bytes) is counted on the bytes received; HTTP errors keep `statusCode` and the text the calendar sent; an unreadable answer is reported as such, not as a `TypeError`; `UrlWhitelist.contains` works with `minimatch` 3 and with 10 and later.
+- `OpenTimestamps.stamp`: the option `m` is enforced (the promise rejects when fewer than `m` calendars answered; before, it resolved with a proof that had no attestation); the option `timeout` is passed on to the calendars.
+- `stamp` and `upgrade` no longer write to the console.
+- `src/timestamp.js`: the "Bitcoin transaction id" annotations of `info`/`json` (the only use of `bitcore-lib`) are gone.
+- `package.json`: `main` points at the existing `index.js`; `types` points at the new `index.d.ts`, which types the subset used for stamping and upgrading; `npm test` runs offline (tape, standard and a `tsc --strict` check of the types); `package-lock.json` is committed.
+- Tests: the tests that fetched examples from GitHub and used live calendars read the local `examples/` and an in-process calendar instead; regression tests cover each fixed defect.
+
+
 ## Installation
 
 #### Node
