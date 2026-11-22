@@ -452,6 +452,42 @@ test('OpenTimestamps.stamp() reports the status codes of the calendars as a list
   assert.end()
 })
 
+test('OpenTimestamps.stamp() puts the status code of a failing calendar on the error', async assert => {
+  const down = await Helper.failingCalendar(503, 'down')
+  const rejecting = await Helper.failingCalendar(400, 'bad request; see docs')
+  try {
+    let err = await rejection(assert, OpenTimestamps.stamp(freshFile(), { calendars: [down.url] }))
+    assert.deepEqual(err.statusCodes, [503])
+    err = await rejection(assert, OpenTimestamps.stamp(freshFile(), { calendars: [rejecting.url] }))
+    assert.deepEqual(err.statusCodes, [400], 'the "; " in the calendar text does not hide the code')
+    assert.true(err.message.includes('bad request; see docs'), 'the text stays in the message')
+    err = await rejection(assert, OpenTimestamps.stamp(freshFile(), { calendars: [down.url, rejecting.url] }))
+    assert.deepEqual(err.statusCodes, [503, 400], 'both codes, in calendar order')
+  } finally {
+    await down.close()
+    await rejecting.close()
+  }
+  assert.end()
+})
+
+test('OpenTimestamps.upgrade() keeps the status codes of every failing calendar, even with "; " in the text', async assert => {
+  const down = await Helper.failingCalendar(503, 'down')
+  const rejecting = await Helper.failingCalendar(400, 'bad request; see docs')
+  try {
+    let detached = await pendingProof('https://pending.example/calendar')
+    let err = await rejection(assert, OpenTimestamps.upgrade(detached, { calendars: [rejecting.url] }))
+    assert.deepEqual(err.statusCodes, [400])
+    assert.true(err.message.includes('bad request; see docs'))
+    detached = await pendingProof('https://pending.example/calendar')
+    err = await rejection(assert, OpenTimestamps.upgrade(detached, { calendars: [down.url, rejecting.url] }))
+    assert.deepEqual(err.statusCodes, [503, 400])
+  } finally {
+    await down.close()
+    await rejecting.close()
+  }
+  assert.end()
+})
+
 test('stamp and upgrade write nothing to the console', async assert => {
   const good = await Helper.pendingCalendar('https://alice.example/calendar')
   const bad = await Helper.failingCalendar(500, 'down')
