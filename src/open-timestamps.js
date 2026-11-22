@@ -7,7 +7,6 @@
  * @license LPGL3
  */
 
-const Promise = require('promise')
 const Context = require('./context.js')
 const DetachedTimestampFile = require('./detached-timestamp-file.js')
 const Timestamp = require('./timestamp.js')
@@ -29,7 +28,6 @@ module.exports = {
    */
   info (detached, options) {
     if ((detached === undefined) || !(detached instanceof DetachedTimestampFile)) {
-      console.error('Invalid input')
       return 'Invalid input'
     }
 
@@ -100,7 +98,8 @@ module.exports = {
    * @param {DetachedTimestampFile[]} detaches - The array of detached file to stamp; input/output parameter.
    * @param {Object} options - The option arguments.
    * @param {String[]} options.calendars - public calendar url list.
-   * @param {number} options.m - at least M calendars replied.
+   * @param {number} options.m - at least M calendars must reply, otherwise the promise is rejected.
+   * @param {number} options.timeout - milliseconds each calendar has to answer.
    * @return {Promise<void,Error>} if resolve modified detaches parameter.
    */
   stamp (detaches, options = {}) {
@@ -130,14 +129,13 @@ module.exports = {
         options.m = 2
       }
     } else if (options.m < 0 || options.m > options.calendars.length) {
-      console.log('m cannot be greater than available calendar neither less or equal 0')
       return new Promise((resolve, reject) => {
         reject(new Error('m cannot be greater than available calendar neither less or equal 0'))
       })
     }
 
     // Build timestamp from the merkle root
-    return this.createTimestamp(merkleTip, options.calendars, options.m).then(timestamp => {
+    return this.createTimestamp(merkleTip, options.calendars, options.m, options.timeout).then(timestamp => {
       if (timestamp === undefined) {
         throw new Error('Error on timestamp creation')
       }
@@ -148,28 +146,28 @@ module.exports = {
    * Create a timestamp
    * @param {timestamp} timestamp - The timestamp.
    * @param {String[]} calendars - Public calendar url list.
-   * @param {number} m - At least M calendars replied.
+   * @param {number} m - At least M calendars must reply; fewer rejects the promise.
+   * @param {number} timeout - Milliseconds each calendar has to answer.
    * @return {Promise<Timestamp,Error>} if resolve return new timestamp.
    */
-  createTimestamp (timestamp, calendars, m) {
+  createTimestamp (timestamp, calendars, m, timeout) {
     const res = []
     if (calendars) {
       calendars.forEach(calendar => {
-        const remote = new Calendar.RemoteCalendar(calendar)
+        const remote = new Calendar.RemoteCalendar(calendar, { timeout })
         res.push(remote.submit(timestamp.msg))
-        console.log('Submitting to remote calendar ' + calendar)
       })
     }
 
     return Promise.all(res.map(Utils.softFail))
       .then(results => {
-        // console.log('results=' + results);
-        results
-          .filter(r => !(r instanceof Error) && r !== undefined)
-          .forEach(resultTimestamp => {
-            timestamp.merge(resultTimestamp)
-          })
-        // console.log(timestamp.strTree());
+        const answers = results.filter(r => !(r instanceof Error) && r !== undefined)
+        const required = m === undefined ? 1 : m
+        if (answers.length < required) {
+          const reasons = results.filter(r => r instanceof Error).map(r => r.message)
+          throw new Error('Only ' + answers.length + ' of ' + required + ' required calendars answered: ' + reasons.join('; '))
+        }
+        answers.forEach(resultTimestamp => timestamp.merge(resultTimestamp))
         return timestamp
       })
   },
@@ -188,7 +186,6 @@ module.exports = {
     const merkleRoots = []
     fileTimestamps.forEach(fileTimestamp => {
       if (!(fileTimestamp instanceof DetachedTimestampFile)) {
-        console.error('Invalid input')
         return undefined
       }
       try {
@@ -213,6 +210,7 @@ module.exports = {
    * @param {Object} options - The option arguments.
    * @param {String[]} options.calendars - Override calendars in timestamp.
    * @param {UrlWhitelist} options.whitelist - Remote calendar whitelist.
+   * @param {number} options.timeout - Milliseconds each calendar has to answer.
    * @return {Promise<boolean,Error>} if resolve return True if the timestamp has changed, False otherwise.
    */
   upgrade (detached, options) {
@@ -254,18 +252,15 @@ module.exports = {
           let calendars = []
           if (options.calendars && options.calendars.length > 0) {
             calendars = options.calendars.slice()
-            console.log('Attestation URI ' + attestation.uri + ' overridden by user-specified remote calendar(s)')
           } else {
             if (options.whitelist.contains(attestation.uri)) {
               calendars.push(attestation.uri)
-            } else {
-              console.log('Ignoring attestation from calendar ' + attestation.uri + ': Calendar not in whitelist')
             }
           }
 
           const commitment = subStamp.msg
           calendars.forEach(calendarUrl => {
-            const calendar = new Calendar.RemoteCalendar(calendarUrl)
+            const calendar = new Calendar.RemoteCalendar(calendarUrl, { timeout: options.timeout })
             // console.log('Checking calendar ' + attestation.uri + ' for ' + Utils.bytesToHex(subStamp.msg))
             promises.push(self.upgradeStamp(subStamp, calendar, commitment, existingAttestations))
           })
@@ -283,9 +278,6 @@ module.exports = {
           }
         })
         return changed
-      }).catch(err => {
-        console.error(err)
-        throw err
       })
   },
 
@@ -301,10 +293,6 @@ module.exports = {
       // console.log(Timestamp.strTreeExtended(upgradedStamp, 0));
       // const atts_from_remote = get_attestations(upgradedStamp)
       const attsFromRemote = upgradedStamp.getAttestations()
-      if (attsFromRemote.size > 0) {
-        // console.log(attsFromRemote.size + ' attestation(s) from ' + calendar.url);
-        console.log('Got 1 attestation(s) from ' + calendar.url)
-      }
 
       // Set difference from remote attestations & existing attestations
       const newAttestations = new Set([...attsFromRemote].filter(x => !existingAttestations.has(x)))
@@ -321,9 +309,6 @@ module.exports = {
         // sub_stamp.merge(upgraded_stamp)
       }
       return {}
-    }).catch(err => {
-      console.log('Calendar ' + calendar.url + ': ' + err.message)
-      throw err
     })
   }
 }
