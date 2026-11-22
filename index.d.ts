@@ -23,9 +23,22 @@ declare namespace OpenTimestamps {
     timeout?: number
   }
 
-  /** Adds pending attestations to the given files in place; rejects when fewer than `m` calendars answered. */
+  /**
+   * What `stamp` and `upgrade` reject with when calendars fail. `message` repeats what the calendars said;
+   * `statusCodes` lists the HTTP status of each calendar that answered with an error, in calendar order
+   * (a calendar that timed out or sent unreadable bytes adds none), so nobody has to parse `message`.
+   */
+  interface CalendarFailure extends Error {
+    statusCodes: number[]
+  }
+
+  /** Adds pending attestations to the given files in place; rejects with a CalendarFailure when fewer than `m` calendars answered. */
   function stamp (detaches: DetachedTimestampFile | DetachedTimestampFile[], options?: StampOptions): Promise<void>
-  /** Resolves true when the timestamp gained an attestation. */
+  /**
+   * Resolves true when the timestamp gained an attestation, false when nothing changed, including when a calendar
+   * answered 404 (no attestation yet). Rejects with a CalendarFailure when a calendar failed in any other way and
+   * no calendar gave an attestation; an attestation from one calendar wins over a failure of another.
+   */
   function upgrade (detached: DetachedTimestampFile, options?: UpgradeOptions): Promise<boolean>
 
   class DetachedTimestampFile {

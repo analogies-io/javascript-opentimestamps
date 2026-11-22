@@ -42,7 +42,21 @@ async function stampAndUpgrade (digest: number[], ots: Uint8Array): Promise<bool
   return changed || await OpenTimestamps.upgrade(stored)
 }
 
+// The error of stamp and upgrade carries the HTTP status codes of the calendars.
+async function calendarStatuses (stored: OpenTimestamps.DetachedTimestampFile): Promise<number[]> {
+  try {
+    await OpenTimestamps.upgrade(stored)
+    await OpenTimestamps.stamp(stored)
+  } catch (err) {
+    const failure = err as OpenTimestamps.CalendarFailure
+    const codes: number[] = failure.statusCodes
+    return codes.filter(code => code >= 500)
+  }
+  return []
+}
+
 // @ts-expect-error a digest must be bytes, not a string
 DetachedTimestampFile.fromHash(new Ops.OpSHA256(), 'deadbeef')
 
 void stampAndUpgrade
+void calendarStatuses

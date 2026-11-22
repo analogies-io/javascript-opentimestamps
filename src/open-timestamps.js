@@ -16,6 +16,21 @@ const Calendar = require('./calendar.js')
 const Notary = require('./notary.js')
 const Merkle = require('./merkle.js')
 
+/**
+ * The error `stamp` and `upgrade` reject with when calendars fail: the message
+ * carries what the calendars said, `statusCodes` the HTTP status of each calendar
+ * that answered with an error, in calendar order (a calendar that timed out or sent
+ * unreadable bytes has none), so callers need not parse the message.
+ * @param {string} prefix - The start of the message.
+ * @param {Error[]} errors - The calendar errors.
+ * @return {Error} The error to reject with.
+ */
+function calendarFailure (prefix, errors) {
+  const err = new Error(prefix + errors.map(e => e.message).join('; '))
+  err.statusCodes = errors.filter(e => Number.isInteger(e.statusCode)).map(e => e.statusCode)
+  return err
+}
+
 module.exports = {
 
   /**
@@ -164,8 +179,8 @@ module.exports = {
         const answers = results.filter(r => !(r instanceof Error) && r !== undefined)
         const required = m === undefined ? 1 : m
         if (answers.length < required) {
-          const reasons = results.filter(r => r instanceof Error).map(r => r.message)
-          throw new Error('Only ' + answers.length + ' of ' + required + ' required calendars answered: ' + reasons.join('; '))
+          throw calendarFailure('Only ' + answers.length + ' of ' + required + ' required calendars answered: ',
+            results.filter(r => r instanceof Error))
         }
         answers.forEach(resultTimestamp => timestamp.merge(resultTimestamp))
         return timestamp
@@ -212,6 +227,8 @@ module.exports = {
    * @param {UrlWhitelist} options.whitelist - Remote calendar whitelist.
    * @param {number} options.timeout - Milliseconds each calendar has to answer.
    * @return {Promise<boolean,Error>} if resolve return True if the timestamp has changed, False otherwise.
+   * A calendar that has no attestation yet (HTTP 404) is not an error. Any other calendar failure rejects
+   * with an Error carrying `statusCodes`, unless another calendar gave an attestation, which wins.
    */
   upgrade (detached, options) {
     // Upgrade timestamp
@@ -228,7 +245,8 @@ module.exports = {
    * @param {Object} options - The option arguments.
    * @param {String[]} options.calendars - Override calendars in timestamp.
    * @param {UrlWhitelist} options.whitelist - Remote calendar whitelist.
-   * @return {Promise<boolean,Error>} if resolve return True if the timestamp has changed, False otherwise.
+   * @return {Promise<boolean,Error>} if resolve return True if the timestamp has changed, False otherwise;
+   * rejects as `upgrade` does.
    */
   upgradeTimestamp (timestamp, options) {
     const existingAttestations = timestamp.getAttestations()
@@ -268,15 +286,25 @@ module.exports = {
       })
     })
 
-    return Promise.all(promises.map(Utils.softFail))
-      .then(results => {
+    return Promise.allSettled(promises)
+      .then(settled => {
         let changed = false
-        results.forEach(result => {
-          if (result !== undefined && !(result instanceof Error)) {
-            changed = true
-            result.subStamp.merge(result.upgradedStamp)
+        const failures = []
+        settled.forEach(outcome => {
+          if (outcome.status === 'fulfilled') {
+            const result = outcome.value
+            if (result.upgradedStamp !== undefined) {
+              changed = true
+              result.subStamp.merge(result.upgradedStamp)
+            }
+          } else if (outcome.reason.statusCode !== 404) {
+            // 404: the calendar has not committed the digest yet, the proof stays pending.
+            failures.push(outcome.reason)
           }
         })
+        if (!changed && failures.length > 0) {
+          throw calendarFailure('Calendar upgrade failed: ', failures)
+        }
         return changed
       })
   },
